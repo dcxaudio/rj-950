@@ -37,7 +37,7 @@ window.RJ = window.RJ || {};
   const VOICES = 8;
   const MIN_LEN = 64;             // menor trecho entre inicio e fim (amostras)
   const NOTE0 = 36;               // nota do pad A1
-  const STORE_KEY = "autosave950";
+  const STORE_KEY = "autosave";        // no store do host: "studio/rj950/autosave"
   const PAGES = { play: 1, rec: 1, sample: 6, program: 1, midi: 1, utility: 3, disk: 3, tune: 1 };
   // nomes no LCD do MIDI Learn do SP (16 colunas, com "950 " na frente)
   const LEARN_MODES = { play: "Play", rec: "Rec", sample: "Edit Smp", program: "Edit Prog", midi: "MIDI", utility: "Utility", disk: "Disk", tune: "Mstr Tune" };
@@ -77,9 +77,10 @@ window.RJ = window.RJ || {};
   }
 
   class S950 {
-    constructor(app) {
-      this.app = app;
-      this.engine = app.engine;
+    /** host: a vista do host (js/host.js), nunca o app do SP. */
+    constructor(host) {
+      this.host = host;
+      this.engine = host.engine;
       this.st = newState();
       this.on = false;
       this.loaded = false;
@@ -97,6 +98,11 @@ window.RJ = window.RJ || {};
       this.focused = false;
       this.audition = null;
       this.sampler = null;
+      // as notas dos pads chegam pelo host, como pelo MIDI
+      host.listen("note", (s, time, vel) => this.note(s, time, vel));
+      host.listen("noteOff", s => this.noteOff(s));
+      host.listen("stop", () => this.stopAll());
+      host.listen("key", e => this.focused && this.keyEvent(e));
     }
 
     get smp() { return this.st.samples[this.cur] || null; }
@@ -111,7 +117,7 @@ window.RJ = window.RJ || {};
       const press = (el, down, up) => {
         el.addEventListener("pointerdown", e => {
           e.preventDefault();
-          if (!this.app.on) return;
+          if (!this.host.on) return;
           try { el.setPointerCapture(e.pointerId); } catch (_) {}
           el.classList.add("down");
           down(e);
@@ -123,7 +129,7 @@ window.RJ = window.RJ || {};
       };
       // MIDI Learn do SP: os controles do 950 tambem aprendem (pelo MIDI, um toque = um passo)
       const learn = (id, el, name, down, kind = "button", h = {}) =>
-        this.app.learn.add(id, el, name, kind, Object.assign({ down: () => { if (this.app.on) down(); } }, h));
+        this.host.learn.add(id, el, name, kind, Object.assign({ down: () => { if (this.host.on) down(); } }, h));
 
       $$("[data-r9mode]", root).forEach(b => {
         const m = b.dataset.r9mode;
@@ -183,7 +189,7 @@ window.RJ = window.RJ || {};
     bindKnob(el, get, set, id, name) {
       const draw = () => { el.querySelector("i").style.transform = `rotate(${-135 + get() * 270}deg)`; };
       el.rjDraw = draw;
-      if (id) this.app.learn.add(id, el, name, "value", { get, set: v => { if (this.app.on) { set(v); draw(); } } });
+      if (id) this.host.learn.add(id, el, name, "value", { get, set: v => { if (this.host.on) { set(v); draw(); } } });
       let y0 = 0, v0 = 0;
       el.addEventListener("pointerdown", e => { e.preventDefault(); el.setPointerCapture(e.pointerId); y0 = e.clientY; v0 = get(); el.dataset.drag = "1"; });
       el.addEventListener("pointermove", e => { if (!el.dataset.drag) return; set(clamp(v0 + (y0 - e.clientY) / 160, 0, 1)); draw(); });
@@ -210,8 +216,8 @@ window.RJ = window.RJ || {};
         this.turn(dir, Math.round(speed));
       };
       // MIDI: um encoder manda varios passos de uma vez quando gira rapido, e a aceleracao vem junto
-      this.app.learn.add("r9:control", el, "950 Control", "encoder", {
-        step: d => { if (!this.app.on) return; for (let i = 0; i < Math.min(Math.abs(d), 24); i++) step(Math.sign(d)); },
+      this.host.learn.add("r9:control", el, "950 Control", "encoder", {
+        step: d => { if (!this.host.on) return; for (let i = 0; i < Math.min(Math.abs(d), 24); i++) step(Math.sign(d)); },
       });
       el.addEventListener("pointerdown", e => { e.preventDefault(); el.setPointerCapture(e.pointerId); y = e.clientY; acc = 0; el.dataset.drag = "1"; });
       el.addEventListener("pointermove", e => {
@@ -246,7 +252,7 @@ window.RJ = window.RJ || {};
     /* =========================================================== liga/desliga */
 
     async boot() {
-      if (this.on || !this.app.on) return;
+      if (this.on || !this.host.on) return;
       this.on = true;
       this.el.root.classList.add("on");
       this.engine.ensure();
@@ -255,7 +261,7 @@ window.RJ = window.RJ || {};
       if (!this.loaded) {
         this.loaded = true;
         try {
-          const saved = await RJ.store.get(STORE_KEY);
+          const saved = await this.host.store.get(STORE_KEY);
           if (saved) this.useState(this.deserialize(saved));
         } catch (e) { console.warn("Memoria do RJ-950 de outra versao", e); }
       }
@@ -317,8 +323,7 @@ window.RJ = window.RJ || {};
 
     /** Primeiro pad sem som no RJ-2000 e sem sample do 950. */
     freePad() {
-      const snd = this.app.p.sounds;
-      for (let i = 0; i < 32; i++) if (!snd[i].pcm && this.st.keys[i] == null) return i;
+      for (let i = 0; i < 32; i++) if (!this.host.padUsed(i) && this.st.keys[i] == null) return i;
       return -1;
     }
 
@@ -451,7 +456,7 @@ window.RJ = window.RJ || {};
     saveNow() {
       clearTimeout(this.saveTimer);
       if (!this.loaded) return;
-      try { RJ.store.put(STORE_KEY, this.serialize()); } catch (e) { console.warn(e); }
+      try { this.host.store.put(STORE_KEY, this.serialize()); } catch (e) { console.warn(e); }
     }
 
     busy(b) { if (this.el.busy) this.el.busy.classList.toggle("on", b); }
@@ -463,8 +468,8 @@ window.RJ = window.RJ || {};
       if (!this.outNode || this.outNode.context !== ctx) {
         this.outNode = ctx.createGain();
         this.outNode.gain.value = 0;
-        // entra no limitador junto com o RJ-2000, mas sem passar pelo Mix Volume dele
-        this.outNode.connect(this.engine.graph.limiter);
+        // entra no limitador junto com o RJ-2000 (pela saida dele no host), sem passar pelo Mix Volume do SP
+        this.outNode.connect(this.host.output());
         this.applyOut();
       }
       return this.outNode;
@@ -608,7 +613,7 @@ window.RJ = window.RJ || {};
     note(s, time, vel) {
       if (!this.on || !this.st.link) return;
       this.blinkMidi(time);
-      const idle = !this.app.seq.playing;
+      const idle = !this.host.playing();
       if (this.mode === "program" && idle) { this.pad = s; this.render(); }
       const id = this.st.keys[s];
       if (id == null) return;
