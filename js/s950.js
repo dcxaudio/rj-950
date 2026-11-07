@@ -38,7 +38,7 @@ window.RJ = window.RJ || {};
   const MIN_LEN = 64;             // menor trecho entre inicio e fim (amostras)
   const NOTE0 = 36;               // nota do pad A1
   const STORE_KEY = "autosave950";
-  const PAGES = { play: 1, rec: 1, sample: 5, program: 1, midi: 1, utility: 3, disk: 3, tune: 1 };
+  const PAGES = { play: 1, rec: 1, sample: 6, program: 1, midi: 1, utility: 3, disk: 3, tune: 1 };
   // nomes no LCD do MIDI Learn do SP (16 colunas, com "950 " na frente)
   const LEARN_MODES = { play: "Play", rec: "Rec", sample: "Edit Smp", program: "Edit Prog", midi: "MIDI", utility: "Utility", disk: "Disk", tune: "Mstr Tune" };
   const LEARN_KEYS = { left: "Cursor <", right: "Cursor >", up: "Page Up", down: "Page Down", on: "On/+", off: "Off/-", ".": "Key .", pb: "PB", ent: "Enter" };
@@ -52,6 +52,9 @@ window.RJ = window.RJ || {};
   const secs = (n, rate) => { const v = n / rate; return v < 100 ? v.toFixed(3).padStart(6, "0") : v.toFixed(2).slice(0, 6); };
   /** FILTER 0..98 -> corte de 60 Hz a ~20 kHz. 99 = aberto. */
   const cutoff = f => 60 * Math.pow(2, (f / 99) * 8.4);
+  /** ATTACK, DECAY e RELEASE 0..99 -> segundos (0 = na hora, 99 = 10 s), mais fino nos tempos curtos. */
+  const envTime = v => 10 * Math.pow(v / 99, 3);
+  const envSecs = v => { const t = envTime(v); return t < 1 ? t.toFixed(2).slice(1) + "s" : t.toFixed(1) + "s"; };
   const cleanName = n => (n || "").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
     .replace(/[^A-Z0-9 #\-_.]/g, " ").replace(/\s+/g, " ").trim().slice(0, 10) || "SAMPLE";
 
@@ -63,7 +66,7 @@ window.RJ = window.RJ || {};
       out: 0.8, recLevel: 0.5, monitor: 0, contrast: 0.6,
       nextId: 1,
       data: {},                               // id -> { rate, pcm }
-      samples: [],                            // { id, name, data, start, end, loop, tune, fine, level, filter, reverse, cut }
+      samples: [],                            // { id, name, data, start, end, loop, tune, fine, level, filter, reverse, cut, att, dec, sus, rel }
       keys: new Array(32).fill(null),         // pad do RJ-2000 -> id do sample
     };
   }
@@ -307,7 +310,7 @@ window.RJ = window.RJ || {};
       const did = st.nextId++;
       st.data[did] = { rate, pcm };
       const s = { id: st.nextId++, name: cleanName(name), data: did, start: 0, end: pcm.length, loop: null,
-        tune: 0, fine: 0, level: 99, filter: 99, reverse: false, cut: 0 };
+        tune: 0, fine: 0, level: 99, filter: 99, reverse: false, cut: 0, att: 0, dec: 0, sus: 99, rel: 0 };
       st.samples.push(s);
       return st.samples.length - 1;
     }
@@ -431,7 +434,8 @@ window.RJ = window.RJ || {};
         const start = clamp(s.start | 0, 0, Math.max(0, len - 1)), end = clamp(s.end | 0 || len, start + 1, len);
         return { id: s.id, name: cleanName(s.name), data: s.data, start, end, loop: s.loop != null ? clamp(s.loop, start, end - 1) : null,
           tune: clamp(s.tune | 0, -24, 24), fine: clamp(s.fine | 0, -50, 50), level: clamp(s.level != null ? s.level : 99, 0, 99),
-          filter: clamp(s.filter != null ? s.filter : 99, 0, 99), reverse: !!s.reverse, cut: clamp(s.cut | 0, 0, 9) };
+          filter: clamp(s.filter != null ? s.filter : 99, 0, 99), reverse: !!s.reverse, cut: clamp(s.cut | 0, 0, 9),
+          att: clamp(s.att | 0, 0, 99), dec: clamp(s.dec | 0, 0, 99), sus: clamp(s.sus != null ? s.sus : 99, 0, 99), rel: clamp(s.rel | 0, 0, 99) };
       });
       const ids = new Set(st.samples.map(s => s.id));
       st.keys = new Array(32).fill(null).map((_, i) => (d.keys && ids.has(d.keys[i]) ? d.keys[i] : null));
@@ -508,7 +512,7 @@ window.RJ = window.RJ || {};
       return buf;
     }
 
-    play(s, when, vel = 1) {
+    play(s, when, vel = 1, pad = -1) {
       const ctx = this.engine.ensure();
       const out = this.ensureOut();
       const d = this.st.data[s.data];
@@ -517,7 +521,7 @@ window.RJ = window.RJ || {};
       const t = Math.max(when || 0, ctx.currentTime);
       // o mesmo sample corta o anterior, e samples do mesmo grupo de corte se cortam
       // (as fatias de um loop); com 8 vozes ocupadas, a mais antiga cede
-      this.voices.filter(v => v.id === s.id || (s.cut && v.cut === s.cut)).forEach(v => this.kill(v, t));
+      this.voices.filter(v => v.id === s.id || (s.cut && v.cut === s.cut)).forEach(v => this.release(v, t));
       const live = this.voices.filter(v => !v.dead);
       if (live.length >= VOICES) this.kill(live[0], t);
       // trecho em segundos do buffer; ao contrario, o trecho fica espelhado no buffer invertido
@@ -542,13 +546,22 @@ window.RJ = window.RJ || {};
         src.connect(f);
         node = f;
       }
+      // envelope do VCA: sobe no ATTACK, cai no DECAY ate o SUSTAIN e fica ate soltar o pad
+      // (ou ate o sample acabar ou ser cortado); dali o RELEASE leva ao silencio
       const g = ctx.createGain();
+      const peak = Math.pow(s.level / 99, 1.6) * vel, hold = peak * Math.pow((s.sus != null ? s.sus : 99) / 99, 1.6);
+      const ta = t + Math.max(0.002, envTime(s.att || 0));
       g.gain.setValueAtTime(0, t);
-      g.gain.linearRampToValueAtTime(Math.pow(s.level / 99, 1.6) * vel, t + 0.002);
+      g.gain.linearRampToValueAtTime(peak, ta);
+      if (hold < peak) {
+        const td = envTime(s.dec || 0);
+        if (td < 0.003) g.gain.setValueAtTime(hold, ta);
+        else g.gain.setTargetAtTime(hold, ta, td / 4);
+      }
       node.connect(g);
       g.connect(out);
       if (loop) src.start(t, from); else src.start(t, from, dur);
-      const v = { id: s.id, cut: s.cut || 0, src, g, t };
+      const v = { id: s.id, cut: s.cut || 0, src, g, t, pad, rel: s.rel ? envTime(s.rel) : 0 };
       this.voices.push(v);
       src.onended = () => {
         this.voices = this.voices.filter(x => x !== v);
@@ -568,6 +581,27 @@ window.RJ = window.RJ || {};
       } catch (e) { /* ja terminou */ }
     }
 
+    /** Fim da nota com o RELEASE do sample. Sem RELEASE (OFF), corta seco como o kill. */
+    release(v, when) {
+      if (v.dead) return;
+      if (v.rel < 0.01) { this.kill(v, when); return; }
+      v.dead = true;
+      const p = v.g.gain, t = Math.max(when || 0, v.g.context.currentTime);
+      try {
+        // segura o valor do envelope onde ele estiver e desce dali
+        if (p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(t);
+        else { p.cancelScheduledValues(t); p.setValueAtTime(p.value, t); }
+        p.setTargetAtTime(0, t, v.rel / 4);
+        v.src.stop(t + v.rel * 1.6 + 0.05);
+      } catch (e) { /* ja terminou */ }
+    }
+
+    /** O pad do RJ-2000 foi solto (ao vivo): as vozes dele vao para o RELEASE. Com RELEASE OFF, tocam ate o fim. */
+    noteOff(pad) {
+      if (!this.on) return;
+      this.voices.filter(v => v.pad === pad && v.rel >= 0.01 && v !== this.audition).forEach(v => this.release(v));
+    }
+
     stopAll() { this.voices.forEach(v => this.kill(v)); this.audition = null; }
 
     /** Nota vinda de um pad do RJ-2000 (ao vivo ou do sequenciador). */
@@ -582,7 +616,7 @@ window.RJ = window.RJ || {};
       if (idx < 0) return;
       // parado, tocar o pad tambem escolhe o sample para editar
       if (idle && (this.mode === "play" || this.mode === "sample") && idx !== this.cur) { this.cur = idx; this.entry = ""; this.render(); }
-      this.play(this.st.samples[idx], time, vel != null ? vel : 1);
+      this.play(this.st.samples[idx], time, vel != null ? vel : 1, s);
     }
 
     blinkMidi(time) {
@@ -807,6 +841,14 @@ window.RJ = window.RJ || {};
             first: 1,
             l1: [...head(), "  FILTER ", this.numField(2, () => s.filter, v => { s.filter = v; this.dirty(); }, 0, 99)],
             l2: [(s.filter >= 99 ? "OPEN (NO FILTER)  " : "CUTOFF " + (cutoff(s.filter) / 1000).toFixed(cutoff(s.filter) < 1000 ? 2 : 1) + "kHz    ").slice(0, 18) + "  2-POLE LOW PASS"],
+          };
+          if (pg === 5) return {
+            first: 1,
+            l1: [...head(), "  ATTACK ", this.numField(2, () => s.att || 0, v => { s.att = v; this.dirty(); }, 0, 99),
+              "  DECAY ", this.numField(2, () => s.dec || 0, v => { s.dec = v; this.dirty(); }, 0, 99)],
+            l2: ["SUSTAIN ", this.numField(2, () => (s.sus != null ? s.sus : 99), v => { s.sus = v; this.dirty(); }, 0, 99),
+              "  RELEASE ", this.numField(3, () => s.rel || 0, v => { s.rel = v; this.dirty(); }, 0, 99, v => (v ? " " + pad2(v) : "OFF")),
+              s.rel ? "  " + envSecs(s.rel) + " AT PAD UP" : "  ONE SHOT (FULL)"],
           };
           // grupo de corte: samples no mesmo grupo cortam um ao outro (0 = desligado)
           const mates = st.samples.map((x, i) => (x !== s && s.cut && x.cut === s.cut ? pad2(i + 1) : null)).filter(Boolean);

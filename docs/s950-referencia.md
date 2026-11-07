@@ -23,7 +23,8 @@ O que levantamos sobre o sampler original e o que entrou na versão reduzida.
 | Keygroups e programas | Um programa só: cada pad do RJ-2000 aponta para um sample. |
 | Notas por cabo MIDI | Ligado direto aos pads do RJ-2000 (notas 36 a 67). |
 | Copiar sample gasta memória | A cópia divide a memória com o original. |
-| Envelopes, LFO, crossfade, time stretch, saídas separadas | Ficaram de fora. |
+| Envelope do VCA (ADSR de volume) | Entrou, por sample (Edit Sample, página 6). |
+| Envelope do filtro, LFO, crossfade, time stretch, saídas separadas | Ficaram de fora. |
 
 ## Fontes
 
