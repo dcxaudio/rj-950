@@ -28,7 +28,7 @@ window.RJ = window.RJ || {};
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const esc = c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] || c);
 
-  const VERSION = "b0.2";
+  const VERSION = "b0.3";
   const COLS = 40;
   const MEM = 1536000;            // 2,25 MB em palavras de 12 bits
   const BITS = 12;
@@ -38,7 +38,7 @@ window.RJ = window.RJ || {};
   const MIN_LEN = 64;             // menor trecho entre inicio e fim (amostras)
   const NOTE0 = 36;               // nota do pad A1
   const STORE_KEY = "autosave950";
-  const PAGES = { play: 1, rec: 1, sample: 4, program: 1, midi: 1, utility: 3, disk: 3, tune: 1 };
+  const PAGES = { play: 1, rec: 1, sample: 5, program: 1, midi: 1, utility: 3, disk: 3, tune: 1 };
   // nomes no LCD do MIDI Learn do SP (16 colunas, com "950 " na frente)
   const LEARN_MODES = { play: "Play", rec: "Rec", sample: "Edit Smp", program: "Edit Prog", midi: "MIDI", utility: "Utility", disk: "Disk", tune: "Mstr Tune" };
   const LEARN_KEYS = { left: "Cursor <", right: "Cursor >", up: "Page Up", down: "Page Down", on: "On/+", off: "Off/-", ".": "Key .", pb: "PB", ent: "Enter" };
@@ -63,7 +63,7 @@ window.RJ = window.RJ || {};
       out: 0.8, recLevel: 0.5, monitor: 0, contrast: 0.6,
       nextId: 1,
       data: {},                               // id -> { rate, pcm }
-      samples: [],                            // { id, name, data, start, end, loop, tune, fine, level, filter, reverse }
+      samples: [],                            // { id, name, data, start, end, loop, tune, fine, level, filter, reverse, cut }
       keys: new Array(32).fill(null),         // pad do RJ-2000 -> id do sample
     };
   }
@@ -307,7 +307,7 @@ window.RJ = window.RJ || {};
       const did = st.nextId++;
       st.data[did] = { rate, pcm };
       const s = { id: st.nextId++, name: cleanName(name), data: did, start: 0, end: pcm.length, loop: null,
-        tune: 0, fine: 0, level: 99, filter: 99, reverse: false };
+        tune: 0, fine: 0, level: 99, filter: 99, reverse: false, cut: 0 };
       st.samples.push(s);
       return st.samples.length - 1;
     }
@@ -431,7 +431,7 @@ window.RJ = window.RJ || {};
         const start = clamp(s.start | 0, 0, Math.max(0, len - 1)), end = clamp(s.end | 0 || len, start + 1, len);
         return { id: s.id, name: cleanName(s.name), data: s.data, start, end, loop: s.loop != null ? clamp(s.loop, start, end - 1) : null,
           tune: clamp(s.tune | 0, -24, 24), fine: clamp(s.fine | 0, -50, 50), level: clamp(s.level != null ? s.level : 99, 0, 99),
-          filter: clamp(s.filter != null ? s.filter : 99, 0, 99), reverse: !!s.reverse };
+          filter: clamp(s.filter != null ? s.filter : 99, 0, 99), reverse: !!s.reverse, cut: clamp(s.cut | 0, 0, 9) };
       });
       const ids = new Set(st.samples.map(s => s.id));
       st.keys = new Array(32).fill(null).map((_, i) => (d.keys && ids.has(d.keys[i]) ? d.keys[i] : null));
@@ -515,8 +515,9 @@ window.RJ = window.RJ || {};
       const buf = d && this.buffer(s.data, s.reverse);
       if (!buf) return null;
       const t = Math.max(when || 0, ctx.currentTime);
-      // o mesmo sample corta o anterior; com 8 vozes ocupadas, a mais antiga cede
-      this.voices.filter(v => v.id === s.id).forEach(v => this.kill(v, t));
+      // o mesmo sample corta o anterior, e samples do mesmo grupo de corte se cortam
+      // (as fatias de um loop); com 8 vozes ocupadas, a mais antiga cede
+      this.voices.filter(v => v.id === s.id || (s.cut && v.cut === s.cut)).forEach(v => this.kill(v, t));
       const live = this.voices.filter(v => !v.dead);
       if (live.length >= VOICES) this.kill(live[0], t);
       // trecho em segundos do buffer; ao contrario, o trecho fica espelhado no buffer invertido
@@ -547,7 +548,7 @@ window.RJ = window.RJ || {};
       node.connect(g);
       g.connect(out);
       if (loop) src.start(t, from); else src.start(t, from, dur);
-      const v = { id: s.id, src, g, t };
+      const v = { id: s.id, cut: s.cut || 0, src, g, t };
       this.voices.push(v);
       src.onended = () => {
         this.voices = this.voices.filter(x => x !== v);
@@ -802,10 +803,17 @@ window.RJ = window.RJ || {};
               "   REVERSE ", this.toggleField(() => s.reverse, on => { s.reverse = on; this.dirty(); }),
               "   LEN " + secs(s.end - s.start, rate) + "s"],
           };
-          return {
+          if (pg === 3) return {
             first: 1,
             l1: [...head(), "  FILTER ", this.numField(2, () => s.filter, v => { s.filter = v; this.dirty(); }, 0, 99)],
             l2: [(s.filter >= 99 ? "OPEN (NO FILTER)  " : "CUTOFF " + (cutoff(s.filter) / 1000).toFixed(cutoff(s.filter) < 1000 ? 2 : 1) + "kHz    ").slice(0, 18) + "  2-POLE LOW PASS"],
+          };
+          // grupo de corte: samples no mesmo grupo cortam um ao outro (0 = desligado)
+          const mates = st.samples.map((x, i) => (x !== s && s.cut && x.cut === s.cut ? pad2(i + 1) : null)).filter(Boolean);
+          return {
+            first: 1,
+            l1: [...head(), "  CUT GROUP ", this.numField(3, () => s.cut || 0, v => { s.cut = v; this.dirty(); }, 0, 9, v => (v ? "  " + v : "OFF"))],
+            l2: [!s.cut ? "OFF: PLAYS OVER THE OTHER SAMPLES" : mates.length ? fit("CUTS SMP " + mates.join(" "), COLS) : "SET THE SAME GROUP ON OTHER SAMPLES"],
           };
         }
         case "program": {
