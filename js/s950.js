@@ -60,7 +60,7 @@ window.RJ = window.RJ || {};
       out: 0.8, recLevel: 0.5, monitor: 0, contrast: 0.6,
       nextId: 1,
       data: {},                               // id -> { rate, pcm }
-      samples: [],                            // { id, name, data, start, end, loop, tune, fine, level, filter, reverse, ver }
+      samples: [],                            // { id, name, data, start, end, loop, tune, fine, level, filter, reverse }
       keys: new Array(32).fill(null),         // pad do RJ-2000 -> id do sample
     };
   }
@@ -280,7 +280,7 @@ window.RJ = window.RJ || {};
     /** Apaga os dados que nenhum sample usa mais. */
     gc() {
       const live = new Set(this.st.samples.map(s => s.data));
-      Object.keys(this.st.data).forEach(k => { if (!live.has(+k)) { delete this.st.data[k]; this.peaks.delete(+k); } });
+      Object.keys(this.st.data).forEach(k => { if (!live.has(+k)) { delete this.st.data[k]; this.peaks.delete(+k); this.cache.delete(k); this.cache.delete(k + "r"); } });
     }
 
     addSample(pcm, rate, name) {
@@ -288,7 +288,7 @@ window.RJ = window.RJ || {};
       const did = st.nextId++;
       st.data[did] = { rate, pcm };
       const s = { id: st.nextId++, name: cleanName(name), data: did, start: 0, end: pcm.length, loop: null,
-        tune: 0, fine: 0, level: 99, filter: 99, reverse: false, ver: 0 };
+        tune: 0, fine: 0, level: 99, filter: 99, reverse: false };
       st.samples.push(s);
       return st.samples.length - 1;
     }
@@ -315,7 +315,7 @@ window.RJ = window.RJ || {};
       if (!s) return;
       if (this.st.samples.length >= MAX_SAMPLES) { this.flash("MEMORY FULL: 99 SAMPLES", "DELETE A SAMPLE FIRST"); return; }
       const n = this.st.samples.filter(x => x.data === s.data).length + 1;
-      const c = Object.assign({}, s, { id: this.st.nextId++, ver: 0, name: (s.name.replace(/ \d+$/, "").slice(0, 7) + " " + n).trim() });
+      const c = Object.assign({}, s, { id: this.st.nextId++, name: (s.name.replace(/ \d+$/, "").slice(0, 7) + " " + n).trim() });
       this.st.samples.splice(this.cur + 1, 0, c);
       this.cur++;
       const where = this.autoPad(c);
@@ -412,7 +412,7 @@ window.RJ = window.RJ || {};
         const start = clamp(s.start | 0, 0, Math.max(0, len - 1)), end = clamp(s.end | 0 || len, start + 1, len);
         return { id: s.id, name: cleanName(s.name), data: s.data, start, end, loop: s.loop != null ? clamp(s.loop, start, end - 1) : null,
           tune: clamp(s.tune | 0, -24, 24), fine: clamp(s.fine | 0, -50, 50), level: clamp(s.level != null ? s.level : 99, 0, 99),
-          filter: clamp(s.filter != null ? s.filter : 99, 0, 99), reverse: !!s.reverse, ver: 0 };
+          filter: clamp(s.filter != null ? s.filter : 99, 0, 99), reverse: !!s.reverse };
       });
       const ids = new Set(st.samples.map(s => s.id));
       st.keys = new Array(32).fill(null).map((_, i) => (d.keys && ids.has(d.keys[i]) ? d.keys[i] : null));
@@ -463,27 +463,28 @@ window.RJ = window.RJ || {};
       this.monGain.gain.setTargetAtTime(Math.pow(this.st.monitor, 2), this.monGain.context.currentTime, 0.02);
     }
 
-    /** Buffer do trecho entre inicio e fim, na taxa do sample (a afinacao fica no playbackRate). */
-    buffer(s) {
-      const key = s.id + ":" + s.ver;
+    /**
+     * Um buffer por dado de audio, na taxa do sample (a afinacao fica no playbackRate),
+     * e outro ao contrario so se algum sample usar REVERSE. Inicio, fim e loop sao
+     * escolhidos na hora de tocar, entao mexer no corte nao refaz nem copia o audio.
+     */
+    buffer(did, rev) {
+      const key = did + (rev ? "r" : "");
       let buf = this.cache.get(key);
       if (buf) return buf;
-      const d = this.st.data[s.data];
+      const d = this.st.data[did];
       if (!d) return null;
-      const a = clamp(s.start, 0, d.pcm.length - 1), b = clamp(s.end, a + 1, d.pcm.length);
-      let part = d.pcm.subarray(a, b);
-      if (s.reverse) part = part.slice().reverse();
+      const pcm = rev ? d.pcm.slice().reverse() : d.pcm;
       const ctx = this.engine.ensure();
       try {
-        buf = ctx.createBuffer(1, part.length, d.rate);
-        buf.getChannelData(0).set(part);
+        buf = ctx.createBuffer(1, pcm.length, d.rate);
+        buf.getChannelData(0).set(pcm);
       } catch (e) {
         // navegador que nao aceita taxas baixas: reamostra para a taxa do sistema
-        const r = RJ.dsp.resample(part, d.rate, ctx.sampleRate);
+        const r = RJ.dsp.resample(pcm, d.rate, ctx.sampleRate);
         buf = ctx.createBuffer(1, r.length, ctx.sampleRate);
         buf.getChannelData(0).set(r);
       }
-      if (this.cache.size > 120) this.cache.clear();
       this.cache.set(key, buf);
       return buf;
     }
@@ -491,22 +492,26 @@ window.RJ = window.RJ || {};
     play(s, when, vel = 1) {
       const ctx = this.engine.ensure();
       const out = this.ensureOut();
-      const buf = this.buffer(s);
+      const d = this.st.data[s.data];
+      const buf = d && this.buffer(s.data, s.reverse);
       if (!buf) return null;
       const t = Math.max(when || 0, ctx.currentTime);
       // o mesmo sample corta o anterior; com 8 vozes ocupadas, a mais antiga cede
       this.voices.filter(v => v.id === s.id).forEach(v => this.kill(v, t));
       const live = this.voices.filter(v => !v.dead);
       if (live.length >= VOICES) this.kill(live[0], t);
-      const d = this.st.data[s.data];
+      // trecho em segundos do buffer; ao contrario, o trecho fica espelhado no buffer invertido
+      const len = d.pcm.length, a = clamp(s.start, 0, len - 1), b = clamp(s.end, a + 1, len);
+      const from = (s.reverse ? len - b : a) / d.rate, dur = (b - a) / d.rate;
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.playbackRate.value = Math.pow(2, (s.tune + (s.fine + this.st.master) / 100) / 12);
       // loop: do ponto AT ate o fim, enquanto nao vier outro disparo (nao vale com REVERSE)
-      if (!s.reverse && s.loop != null && s.loop >= s.start && s.loop < s.end - MIN_LEN) {
+      const loop = !s.reverse && s.loop != null && s.loop >= a && s.loop < b - MIN_LEN;
+      if (loop) {
         src.loop = true;
-        src.loopStart = (s.loop - s.start) / d.rate;
-        src.loopEnd = buf.duration;
+        src.loopStart = s.loop / d.rate;
+        src.loopEnd = b / d.rate;
       }
       let node = src;
       if (s.filter < 99) {
@@ -522,7 +527,7 @@ window.RJ = window.RJ || {};
       g.gain.linearRampToValueAtTime(Math.pow(s.level / 99, 1.6) * vel, t + 0.002);
       node.connect(g);
       g.connect(out);
-      src.start(t);
+      if (loop) src.start(t, from); else src.start(t, from, dur);
       const v = { id: s.id, src, g, t };
       this.voices.push(v);
       src.onended = () => {
@@ -620,9 +625,6 @@ window.RJ = window.RJ || {};
     }
 
     /* =========================================================== campos */
-
-    /** Muda um parametro do sample atual (refaz o buffer se precisar). */
-    touch(s, audio) { if (audio) s.ver++; this.dirty(); }
 
     /** Ponto de corte no cruzamento de zero, andando na direcao do giro. */
     snap(s, pos, dir) {
@@ -763,27 +765,27 @@ window.RJ = window.RJ || {};
           const rate = st.data[s.data].rate, len = st.data[s.data].pcm.length;
           if (pg === 0) return {
             first: 1,
-            l1: [...head(), "  ST ", this.timeField(() => s.start, v => { s.start = v; if (s.loop != null && s.loop < v) s.loop = v; this.touch(s, true); }, () => 0, () => s.end - MIN_LEN),
-              "  END ", this.timeField(() => s.end, v => { s.end = v; if (s.loop != null && s.loop > v - MIN_LEN) s.loop = Math.max(s.start, v - MIN_LEN); this.touch(s, true); }, () => s.start + MIN_LEN, () => len)],
+            l1: [...head(), "  ST ", this.timeField(() => s.start, v => { s.start = v; if (s.loop != null && s.loop < v) s.loop = v; this.dirty(); }, () => 0, () => s.end - MIN_LEN),
+              "  END ", this.timeField(() => s.end, v => { s.end = v; if (s.loop != null && s.loop > v - MIN_LEN) s.loop = Math.max(s.start, v - MIN_LEN); this.dirty(); }, () => s.start + MIN_LEN, () => len)],
             l2: this.overview(s),
           };
           if (pg === 1) return {
             first: 1,
-            l1: [...head(), "  LOOP ", this.toggleField(() => s.loop != null, on => { s.loop = on ? (s.loop != null ? s.loop : s.start) : null; this.touch(s); }),
-              "  AT ", s.loop != null ? this.timeField(() => s.loop, v => { s.loop = v; this.touch(s); }, () => s.start, () => s.end - MIN_LEN) : "------"],
+            l1: [...head(), "  LOOP ", this.toggleField(() => s.loop != null, on => { s.loop = on ? (s.loop != null ? s.loop : s.start) : null; this.dirty(); }),
+              "  AT ", s.loop != null ? this.timeField(() => s.loop, v => { s.loop = v; this.dirty(); }, () => s.start, () => s.end - MIN_LEN) : "------"],
             l2: this.overview(s, true),
           };
           if (pg === 2) return {
             first: 1,
-            l1: [...head(), "  TUNE ", this.numField(3, () => s.tune, v => { s.tune = v; this.touch(s); }, -24, 24, signed),
-              "  FINE ", this.numField(3, () => s.fine, v => { s.fine = v; this.touch(s); }, -50, 50, signed)],
-            l2: ["LEVEL ", this.numField(2, () => s.level, v => { s.level = v; this.touch(s); }, 0, 99),
-              "   REVERSE ", this.toggleField(() => s.reverse, on => { s.reverse = on; this.touch(s, true); }),
+            l1: [...head(), "  TUNE ", this.numField(3, () => s.tune, v => { s.tune = v; this.dirty(); }, -24, 24, signed),
+              "  FINE ", this.numField(3, () => s.fine, v => { s.fine = v; this.dirty(); }, -50, 50, signed)],
+            l2: ["LEVEL ", this.numField(2, () => s.level, v => { s.level = v; this.dirty(); }, 0, 99),
+              "   REVERSE ", this.toggleField(() => s.reverse, on => { s.reverse = on; this.dirty(); }),
               "   LEN " + secs(s.end - s.start, rate) + "s"],
           };
           return {
             first: 1,
-            l1: [...head(), "  FILTER ", this.numField(2, () => s.filter, v => { s.filter = v; this.touch(s); }, 0, 99)],
+            l1: [...head(), "  FILTER ", this.numField(2, () => s.filter, v => { s.filter = v; this.dirty(); }, 0, 99)],
             l2: [(s.filter >= 99 ? "OPEN (NO FILTER)  " : "CUTOFF " + (cutoff(s.filter) / 1000).toFixed(cutoff(s.filter) < 1000 ? 2 : 1) + "kHz    ").slice(0, 18) + "  2-POLE LOW PASS"],
           };
         }
