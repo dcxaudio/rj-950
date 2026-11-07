@@ -28,7 +28,7 @@ window.RJ = window.RJ || {};
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const esc = c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] || c);
 
-  const VERSION = "b0.1";
+  const VERSION = "b0.2";
   const COLS = 40;
   const MEM = 1536000;            // 2,25 MB em palavras de 12 bits
   const BITS = 12;
@@ -39,6 +39,9 @@ window.RJ = window.RJ || {};
   const NOTE0 = 36;               // nota do pad A1
   const STORE_KEY = "autosave950";
   const PAGES = { play: 1, rec: 1, sample: 4, program: 1, midi: 1, utility: 3, disk: 3, tune: 1 };
+  // nomes no LCD do MIDI Learn do SP (16 colunas, com "950 " na frente)
+  const LEARN_MODES = { play: "Play", rec: "Rec", sample: "Edit Smp", program: "Edit Prog", midi: "MIDI", utility: "Utility", disk: "Disk", tune: "Mstr Tune" };
+  const LEARN_KEYS = { left: "Cursor <", right: "Cursor >", up: "Page Up", down: "Page Down", on: "On/+", off: "Off/-", ".": "Key .", pb: "PB", ent: "Enter" };
   const AUDIO_RE = /\.(wav|wave|aif|aiff|aifc|mp3|ogg|oga|flac|m4a|aac|opus)$/i;
 
   RJ.S950_MEM = MEM;
@@ -115,7 +118,15 @@ window.RJ = window.RJ || {};
         el.addEventListener("pointercancel", end);
         el.addEventListener("contextmenu", e => e.preventDefault());
       };
-      $$("[data-r9mode]", root).forEach(b => press(b, () => this.modeButton(b.dataset.r9mode)));
+      // MIDI Learn do SP: os controles do 950 tambem aprendem (pelo MIDI, um toque = um passo)
+      const learn = (id, el, name, down, kind = "button", h = {}) =>
+        this.app.learn.add(id, el, name, kind, Object.assign({ down: () => { if (this.app.on) down(); } }, h));
+
+      $$("[data-r9mode]", root).forEach(b => {
+        const m = b.dataset.r9mode;
+        press(b, () => this.modeButton(m));
+        learn("r9mode:" + m, b, "950 " + LEARN_MODES[m], () => this.modeButton(m));
+      });
       $$("[data-r9key]", root).forEach(b => {
         const k = b.dataset.r9key;
         let t1 = 0, t2 = 0;
@@ -127,13 +138,16 @@ window.RJ = window.RJ || {};
             t1 = setTimeout(() => { t2 = setInterval(() => { n++; this.key(k, n > 40 ? 50 : n > 15 ? 10 : 1); }, 60); }, 420);
           }
         }, () => { clearTimeout(t1); clearInterval(t2); });
+        learn("r9key:" + k, b, "950 " + (LEARN_KEYS[k] || "Key " + k), () => this.key(k));
       });
-      press($("#r9-power"), () => (this.on ? this.powerOff() : this.boot()));
+      const power = () => (this.on ? this.powerOff() : this.boot());
+      press($("#r9-power"), power);
+      learn("r9:power", $("#r9-power"), "950 Power", power);
 
-      this.bindKnob($("#r9-rec"), () => this.st.recLevel, v => { this.st.recLevel = v; this.applyRec(); this.dirty(); });
-      this.bindKnob($("#r9-mon"), () => this.st.monitor, v => { this.st.monitor = v; this.applyMonitor(); this.dirty(); });
-      this.bindKnob($("#r9-out"), () => this.st.out, v => { this.st.out = v; this.applyOut(); this.dirty(); });
-      this.bindKnob($("#r9-contrast"), () => this.st.contrast, v => { this.st.contrast = v; this.applyContrast(); this.dirty(); });
+      this.bindKnob($("#r9-rec"), () => this.st.recLevel, v => { this.st.recLevel = v; this.applyRec(); this.dirty(); }, "r9:rec", "950 Rec Level");
+      this.bindKnob($("#r9-mon"), () => this.st.monitor, v => { this.st.monitor = v; this.applyMonitor(); this.dirty(); }, "r9:mon", "950 Monitor");
+      this.bindKnob($("#r9-out"), () => this.st.out, v => { this.st.out = v; this.applyOut(); this.dirty(); }, "r9:out", "950 Output");
+      this.bindKnob($("#r9-contrast"), () => this.st.contrast, v => { this.st.contrast = v; this.applyContrast(); this.dirty(); }, "r9:contrast", "950 Contrast");
       this.bindControl($("#r9-control"));
 
       // disquete: clicar abre o seletor de arquivos; soltar um arquivo carrega
@@ -163,9 +177,10 @@ window.RJ = window.RJ || {};
       this.lcd(["", ""]);
     }
 
-    bindKnob(el, get, set) {
+    bindKnob(el, get, set, id, name) {
       const draw = () => { el.querySelector("i").style.transform = `rotate(${-135 + get() * 270}deg)`; };
       el.rjDraw = draw;
+      if (id) this.app.learn.add(id, el, name, "value", { get, set: v => { if (this.app.on) { set(v); draw(); } } });
       let y0 = 0, v0 = 0;
       el.addEventListener("pointerdown", e => { e.preventDefault(); el.setPointerCapture(e.pointerId); y0 = e.clientY; v0 = get(); el.dataset.drag = "1"; });
       el.addEventListener("pointermove", e => { if (!el.dataset.drag) return; set(clamp(v0 + (y0 - e.clientY) / 160, 0, 1)); draw(); });
@@ -191,6 +206,10 @@ window.RJ = window.RJ || {};
         ind.style.transform = `rotate(${angle}deg)`;
         this.turn(dir, Math.round(speed));
       };
+      // MIDI: um encoder manda varios passos de uma vez quando gira rapido, e a aceleracao vem junto
+      this.app.learn.add("r9:control", el, "950 Control", "encoder", {
+        step: d => { if (!this.app.on) return; for (let i = 0; i < Math.min(Math.abs(d), 24); i++) step(Math.sign(d)); },
+      });
       el.addEventListener("pointerdown", e => { e.preventDefault(); el.setPointerCapture(e.pointerId); y = e.clientY; acc = 0; el.dataset.drag = "1"; });
       el.addEventListener("pointermove", e => {
         if (!el.dataset.drag) return;
