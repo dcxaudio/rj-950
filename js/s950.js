@@ -12,7 +12,8 @@
  * - 12 bits, taxa escolhida ao gravar ou carregar (7,5 a 48 kHz) e 2,25 MB de
  *   memoria, como com as duas expansoes EXM-006: 48 s a 32 kHz.
  * - Por sample: inicio, fim, loop, tune, fine, level, reverse e o filtro
- *   passa-baixa de 2 polos sem ressonancia (como o do S950).
+ *   passa-baixa de 6 polos sem ressonancia (Butterworth, como o MF6 do S950),
+ *   com um anti-imaging fixo de 6 polos em 0,4 x a taxa de reproducao.
  * - 8 vozes. O mesmo sample disparado de novo corta o anterior.
  * Mensagens do LCD (2 x 40) em ingles e maiusculas, como no original.
  */
@@ -53,6 +54,23 @@ window.RJ = window.RJ || {};
   const secs = (n, rate) => { const v = n / rate; return v < 100 ? v.toFixed(3).padStart(6, "0") : v.toFixed(2).slice(0, 6); };
   /** FILTER 0..98 -> corte de 60 Hz a ~20 kHz. 99 = aberto. */
   const cutoff = f => 60 * Math.pow(2, (f / 99) * 8.4);
+  /**
+   * Passa-baixa Butterworth de 6a ordem (36 dB/oitava, -3 dB no corte, sem pico):
+   * 3 biquads em serie, mesma frequencia, com estes Q. No Web Audio o Q do
+   * lowpass e em dB, entao o Q linear vira 20*log10(Q).
+   */
+  const BUTTER6 = [0.5176, 0.7071, 1.9319].map(q => 20 * Math.log10(q));
+  function lowpass6(ctx, node, fc) {
+    for (const q of BUTTER6) {
+      const f = ctx.createBiquadFilter();
+      f.type = "lowpass";
+      f.Q.value = q;
+      f.frequency.value = fc;
+      node.connect(f);
+      node = f;
+    }
+    return node;
+  }
   /** ATTACK, DECAY e RELEASE 0..99 -> segundos (0 = na hora, 99 = 10 s), mais fino nos tempos curtos. */
   const envTime = v => 10 * Math.pow(v / 99, 3);
   const envSecs = v => { const t = envTime(v); return t < 1 ? t.toFixed(2).slice(1) + "s" : t.toFixed(1) + "s"; };
@@ -547,14 +565,13 @@ window.RJ = window.RJ || {};
         src.loopEnd = b / d.rate;
       }
       let node = src;
-      if (s.filter < 99) {
-        const f = ctx.createBiquadFilter();
-        f.type = "lowpass";
-        f.Q.value = 0.5;                       // 2 polos, sem ressonancia
-        f.frequency.value = Math.min(cutoff(s.filter), ctx.sampleRate * 0.45);
-        src.connect(f);
-        node = f;
-      }
+      // anti-imaging fixo (sempre ligado, mesmo com FILTER 99): 6 polos em 0,4 x a taxa
+      // em que o sample sai (taxa do sample x afinacao), ate 0,45 x a taxa do sistema.
+      // Com taxa de saida >= sistema / 0,9 ele ja ficaria acima de 0,44 x sistema: pula.
+      const outRate = d.rate * src.playbackRate.value;
+      if (outRate < ctx.sampleRate / 0.9) node = lowpass6(ctx, node, Math.min(outRate * 0.4, ctx.sampleRate * 0.45));
+      // FILTER: o passa-baixa de 6 polos do S950 (MF6CN-50), 99 = aberto
+      if (s.filter < 99) node = lowpass6(ctx, node, Math.min(cutoff(s.filter), ctx.sampleRate * 0.45));
       // envelope do VCA: sobe no ATTACK, cai no DECAY ate o SUSTAIN e fica ate soltar o pad
       // (ou ate o sample acabar ou ser cortado); dali o RELEASE leva ao silencio
       const g = ctx.createGain();
@@ -849,7 +866,7 @@ window.RJ = window.RJ || {};
           if (pg === 3) return {
             first: 1,
             l1: [...head(), "  FILTER ", this.numField(2, () => s.filter, v => { s.filter = v; this.dirty(); }, 0, 99)],
-            l2: [(s.filter >= 99 ? "OPEN (NO FILTER)  " : "CUTOFF " + (cutoff(s.filter) / 1000).toFixed(cutoff(s.filter) < 1000 ? 2 : 1) + "kHz    ").slice(0, 18) + "  2-POLE LOW PASS"],
+            l2: [(s.filter >= 99 ? "OPEN (NO FILTER)  " : "CUTOFF " + (cutoff(s.filter) / 1000).toFixed(cutoff(s.filter) < 1000 ? 2 : 1) + "kHz    ").slice(0, 18) + "  6-POLE LOW PASS"],
           };
           if (pg === 5) return {
             first: 1,

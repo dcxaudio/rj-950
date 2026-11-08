@@ -43,7 +43,7 @@ Cada pad do RJ-2000 manda uma nota (A1 = 36 ... D8 = 67), tocado ao vivo ou pelo
 | Edit Sample | 1 | ST e END: início e fim, em segundos. A linha 2 mostra o sample inteiro, com o trecho usado aceso e marcas no início e no fim. |
 | | 2 | LOOP ON/OFF e AT: o loop vai do ponto AT até o fim. |
 | | 3 | TUNE (±24 semitons), FINE (±50 cents), LEVEL (00 a 99) e REVERSE. |
-| | 4 | FILTER: passa-baixa de 2 polos sem ressonância, como o do S950. 99 = aberto; abaixando, o corte desce até 60 Hz. |
+| | 4 | FILTER: passa-baixa de 6 polos sem ressonância (Butterworth, 36 dB por oitava), como o MF6 do S950. 99 = aberto; abaixando, o corte desce até 60 Hz. |
 | | 5 | CUT GROUP: OFF ou 1 a 9. Samples no mesmo grupo cortam um ao outro: tocar um para o que estava soando. A linha 2 mostra quais samples estão no grupo. |
 | | 6 | Envelope do VCA (volume): ATTACK, DECAY, SUSTAIN e RELEASE, de 00 a 99. ATTACK é o tempo para subir, DECAY o tempo para cair até o nível do SUSTAIN, e o som fica no SUSTAIN enquanto o pad está apertado. RELEASE é a cauda depois de soltar o pad. Os tempos vão de 0 a 10 s, mais finos nos valores baixos (10 ≈ 0,01 s, 50 ≈ 1,3 s, 99 = 10 s). Com RELEASE em OFF (o padrão), o sample é one shot: toca inteiro mesmo soltando o pad, como antes. No sequenciador as notas não têm duração (como no SP), então o som fica no SUSTAIN até acabar ou até ser cortado por outra nota ou pelo CUT GROUP, e aí entra o RELEASE. O padrão (00, 00, 99, OFF) soa igual a sem envelope. |
 | Edit Program | | PAD do SP → SMP do 950. |

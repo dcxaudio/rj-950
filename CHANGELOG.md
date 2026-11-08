@@ -1,5 +1,9 @@
 # Changelog
 
+## Próxima
+
+- FILTER igual ao do S950: passa-baixa Butterworth de **6 polos** (36 dB por oitava, −3 dB no corte, sem pico), como o chip MF6. Antes era de 2 polos, com um pico de +0,5 dB no corte. Ganhou também um anti-imaging fixo de 6 polos em 0,4 × a taxa em que o sample sai, ligado inclusive em FILTER 99, que tira o chiado metálico das taxas baixas.
+
 ## b0.1 (beta)
 
 - O RJ-950 ganha repositório e página próprios. O histórico de `js/s950.js` e de `docs/s950-referencia.md` vem do [RJ-2000](https://github.com/dcxaudio/rj-2000), onde ele nasceu como o rack embaixo do SP.
