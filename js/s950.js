@@ -28,7 +28,7 @@ window.RJ = window.RJ || {};
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const esc = c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] || c);
 
-  const VERSION = "b0.3";
+  const VERSION = "b0.1";
   const COLS = 40;
   const MEM = 1536000;            // 2,25 MB em palavras de 12 bits
   const BITS = 12;
@@ -46,7 +46,8 @@ window.RJ = window.RJ || {};
 
   RJ.S950_MEM = MEM;
 
-  const padName = i => RJ.soundLabel(i);
+  // nome do pad como no RJ-2000 (A1 ... D8); numa pagina sem o SP, o mesmo calculo aqui
+  const padName = i => (RJ.soundLabel ? RJ.soundLabel(i) : "ABCD"[i >> 3] + ((i & 7) + 1));
   const khz = r => (r / 1000).toFixed(1).padStart(4, " ");
   /** Posicao em segundos, sempre com 6 caracteres. */
   const secs = (n, rate) => { const v = n / rate; return v < 100 ? v.toFixed(3).padStart(6, "0") : v.toFixed(2).slice(0, 6); };
