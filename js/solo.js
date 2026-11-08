@@ -12,7 +12,7 @@
   window.addEventListener("DOMContentLoaded", () => {
     const host = RJ.Host.solo("rj950");
     const s950 = new RJ.S950(host.view("rj950"));
-    host.add("rj950", s950, { label: "RJ-950", receive: f => { if (!s950.on) return "off"; s950.loadFile(f); } });
+    host.add("rj950", s950, { label: "RJ-950" });
     s950.build();
     new RJ.LearnBar(host, { root: document.getElementById("r9"), bar: document.getElementById("learnbar") });
 

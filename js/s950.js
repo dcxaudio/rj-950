@@ -330,12 +330,15 @@ window.RJ = window.RJ || {};
 
     padOf(id) { return this.st.keys.indexOf(id); }
 
+    /** O RJ-2000 esta no rack (Studio)? Sozinho, os pads vem das teclas A-K e do MIDI. */
+    withSP() { return this.host.targets().some(t => t.id === "rj2000"); }
+
     /** Liga o sample a um pad livre e devolve o texto para o LCD. */
     autoPad(s) {
       const pd = this.freePad();
       if (pd < 0) return "NO FREE PAD: SET ONE IN EDIT PROGRAM";
       this.st.keys[pd] = s.id;
-      return "ON PAD " + padName(pd) + " - HIT IT ON THE RJ-2000";
+      return "ON PAD " + padName(pd) + (this.withSP() ? " - HIT IT ON THE RJ-2000" : " - HIT IT WITH A-K OR MIDI");
     }
 
     copySample() {
@@ -883,12 +886,12 @@ window.RJ = window.RJ || {};
                 if (k >= -1 && k < n) { st.keys[this.pad] = k < 0 ? null : st.samples[k].id; this.dirty(); }
               },
             }, " " + (m ? m.name : "")],
-            l2: [n ? "HIT A PAD ON THE RJ-2000 TO SELECT IT" : "NO SAMPLES IN MEMORY"],
+            l2: [n ? (this.withSP() ? "HIT A PAD ON THE RJ-2000 TO SELECT IT" : "HIT A PAD (A-K OR MIDI) TO SELECT IT") : "NO SAMPLES IN MEMORY"],
           };
         }
         case "midi":
           return {
-            l1: ["MIDI   RECEIVE FROM RJ-2000  ", this.toggleField(() => st.link, on => { st.link = on; if (!on) this.stopAll(); this.dirty(); })],
+            l1: [this.withSP() ? "MIDI   RECEIVE FROM RJ-2000  " : "MIDI   RECEIVE PADS          ", this.toggleField(() => st.link, on => { st.link = on; if (!on) this.stopAll(); this.dirty(); })],
             l2: ["PADS A1-D8 SEND NOTES 36-67   OMNI"],
           };
         case "utility": {
