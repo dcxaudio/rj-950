@@ -15,7 +15,7 @@ No Studio, quem toca o 950 são os pads e o sequenciador do RJ-2000, e o MIDI Le
 
 Versão reduzida, inspirada no Akai S950 de 1988, o sampler que muita gente usava junto com o SP-1200. O SP mandava notas MIDI e o S950 tocava os loops, os baixos e as frases, com mais tempo de sample e o filtro. Aqui os dois já vêm ligados.
 
-**Ligando:** o 950 liga junto com o SP (`LOADING OPERATING SYSTEM`) e volta com a memória salva no navegador. O botão **Power** desliga e liga só ele. O LCD é de 2 linhas e 40 caracteres, com mensagens em maiúsculas, como no original.
+**Ligando:** o 950 liga junto com o SP (`LOADING OPERATING SYSTEM`) e volta com a memória salva no navegador. O botão **Power** desliga e liga só ele. O LCD é de 2 linhas e 40 caracteres, com mensagens em maiúsculas, como no original. (O mockup da face nova tinha 1 linha; por decisão de Igor o visor mantém as 2 linhas do original do 950.)
 
 ## Como os pads do SP tocam o 950
 
@@ -28,10 +28,12 @@ Cada pad do RJ-2000 manda uma nota (A1 = 36 ... D8 = 67), tocado ao vivo ou pelo
 
 ## Painel
 
-- **Modos** (8 botões embaixo do LCD, com luz): Play, Rec, Edit Sample, Edit Program, MIDI, Utility, Disk, Master Tune. Apertar o mesmo modo de novo passa para a página seguinte. A tabela impressa embaixo dos botões lista as páginas.
+A face segue a do original: chapa clara de 977 x 295 (razão 3,31:1), sem orelhas de rack. Ela encolhe junto com a largura da página (no Studio e no celular), sem mudar a posição das peças.
+
+- **Modos** (8 teclas brancas embaixo do LCD, com luz): Play, Rec, Edit Sample, Edit Prgrm, MIDI, Utility, Disk, Master Tune. Apertar o mesmo modo de novo passa para a página seguinte. As tabelas impressas embaixo das teclas (EDIT SAMPLE, EDIT PROGRAM, DISK) são decoração, como no original; as páginas do RJ-950 ficam em **Funções de cada modo**, embaixo do painel (recolhido).
 - **Control** (o knob grande): gira o valor que está no cursor. Arraste para cima ou para baixo, ou use a roda do mouse. Girando rápido, os passos ficam maiores.
-- **Teclado:** números e ponto digitam um valor, **Ent** confirma (ou executa a página). **◀ ▶** movem o cursor, **Page ▲▼** trocam de página, **On/+** e **Off/−** sobem ou descem um passo (segurando, repetem). **PB** toca ou para o sample atual.
-- **Disquete:** clique para escolher um arquivo de áudio ou solte o arquivo em cima dele. A luz verde acende enquanto carrega.
+- **Teclado** (placa cinza, teclas azuis e cinzas): números digitam um valor, **Ent** confirma (ou executa a página). O painel não tem tecla de ponto, como o original: o ponto decimal vem da tecla **.** do computador (ou de um controle MIDI aprendido). **Space** e **Letter** estão no painel como no original, mas não fazem nada no RJ-950. **◀ ▶** movem o cursor, **Page ▲▼** trocam de página, **On/+** e **Off/−** sobem ou descem um passo (segurando, repetem). **PB** toca ou para o sample atual.
+- **Disquete:** clique para escolher um arquivo de áudio ou solte o arquivo em cima dele. A luz vermelha do drive pisca enquanto carrega.
 - **Rec Level** (ganho do microfone, de −12 a +36 dB), **Monitor** (ouvir a entrada) e **Output** (volume do 950). O 950 sai junto com o SP, mas não passa pelo Mix Volume dele. **Contrast** ajusta o LCD.
 
 ## Modos e páginas

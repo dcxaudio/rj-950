@@ -2,6 +2,9 @@
 
 ## Próxima
 
+- **Face nova**, igual ao mockup aprovado (que segue a foto do original): chapa clara de 977 x 295 (razão 3,31:1) sem orelhas de rack, logo DCX vermelha, POWER com moldura preta, DISPLAY CONTRAST serrilhado, LCD de moldura preta larga com vidro verde e 40 colunas, MIDI RECEIVE com LED quadrado, 8 teclas brancas de modo com LED em barra, as 3 tabelas impressas (EDIT SAMPLE, EDIT PROGRAM, DISK), placa cinza com teclado azul (numerais brancos, como na foto; a variável `--r950-key-num` troca a cor), ARROW/CURSOR, PAGE, SPACE, LETTER, ENT e P.B cinzas, CONTROL de alumínio, REC LEVEL (aleta vermelha), MONITOR e OUTPUT com escala MIN/MAX, jacks MIC/LINE/TRIGGER e drive de disquete com fenda, porta, LED e ejetar. Tudo em CSS, sem imagens; a face escala com a largura (container query), sem JS.
+- O funcionamento não mudou: mesmos ids e `data-r9*`, o `js/s950.js` é o mesmo. O LCD continua com as 2 linhas que o 950 usa, dentro do vidro de 1 linha do original. Sem tecla "." no painel (ela fica escondida para o MIDI Learn; o ponto vem do teclado do computador). SPACE e LETTER são só do painel. A tabela de páginas virou ajuda opcional, recolhida embaixo do painel ("Funções de cada modo"). Decisão de Igor: o visor mantém as 2 linhas (diferença consciente em relação ao mockup, que tinha 1 linha).
+
 - FILTER igual ao do S950: passa-baixa Butterworth de **6 polos** (36 dB por oitava, −3 dB no corte, sem pico), como o chip MF6. Antes era de 2 polos, com um pico de +0,5 dB no corte. Ganhou também um anti-imaging fixo de 6 polos em 0,4 × a taxa em que o sample sai, ligado inclusive em FILTER 99, que tira o chiado metálico das taxas baixas.
 
 ## b0.1 (beta)
