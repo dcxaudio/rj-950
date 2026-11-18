@@ -102,7 +102,9 @@ window.RJ = window.RJ || {};
       this.engine = host.engine;
       this.st = newState();
       this.on = false;
-      this.loaded = false;
+      this.loaded = false;          // a leitura da memoria guardada ja comecou
+      this.restored = false;        // ... e terminou bem: so entao o salvamento automatico grava
+      this.saveWarned = false;
       this.mode = "play";
       this.pages = {};
       this.field = 0;
@@ -277,19 +279,51 @@ window.RJ = window.RJ || {};
       this.engine.ensure();
       this.applyOut();
       this.lcd(["RJ-950  MIDI DIGITAL SAMPLER       " + VERSION, "LOADING OPERATING SYSTEM..."]);
-      if (!this.loaded) {
+      // le a memoria guardada no primeiro boot; se a leitura falhou, tenta de novo no
+      // proximo boot enquanto nada foi criado nesta sessao
+      if (!this.restored && !this.readP && !this.st.samples.length) {
         this.loaded = true;
-        try {
-          const saved = await this.host.store.get(STORE_KEY);
-          if (saved) this.useState(this.deserialize(saved));
-        } catch (e) { console.warn("Memoria do RJ-950 de outra versao", e); }
+        this.readP = this.restore().finally(() => { this.readP = null; });
       }
+      if (this.readP) await this.readP;
+      const readFail = !this.restored;
       await wait(650);
       if (!this.on) return;
       this.lcd(["RJ-950  MIDI DIGITAL SAMPLER       " + VERSION, "MEMORY 2.25MB   " + this.st.samples.length + " SAMPLES   8 VOICES"]);
       await wait(550);
       if (!this.on) return;
       this.setMode("play");
+      if (readFail) this.flash("SAVED MEMORY COULD NOT BE READ", "AUTOSAVE OFF: SAVE TO FILE IN DISK", 5000);
+    }
+
+    /**
+     * Le a memoria guardada. So libera o salvamento automatico (restored) quando a
+     * leitura termina bem, para nao gravar um 950 vazio por cima do que estava
+     * salvo (P0-05). Com o core novo, getStrict separa "nao existe" de erro no
+     * banco; com o core antigo, get devolve null nos dois casos.
+     * Devolve false quando nao deu para ler (o salvamento fica desligado).
+     */
+    async restore() {
+      const store = this.host.store;
+      let saved;
+      try {
+        saved = store.getStrict ? await store.getStrict(STORE_KEY) : await store.get(STORE_KEY);
+      } catch (e) {
+        console.warn("Nao foi possivel ler a memoria do RJ-950", e);
+        return false;
+      }
+      if (saved != null) {
+        try { this.useState(this.deserialize(saved)); }
+        catch (e) {
+          // memoria ilegivel (ou de outra versao): guarda o valor bruto antes de liberar a gravacao
+          console.warn("Memoria do RJ-950 ilegivel; copia em autosave-bad", e);
+          let kept = false;
+          try { kept = (await store.put(STORE_KEY + "-bad", saved)) !== false; } catch (_) { kept = false; }
+          if (!kept) return false;
+        }
+      }
+      this.restored = true;
+      return true;
     }
 
     powerOff() {
@@ -477,8 +511,23 @@ window.RJ = window.RJ || {};
 
     saveNow() {
       clearTimeout(this.saveTimer);
-      if (!this.loaded) return;
-      try { this.host.store.put(STORE_KEY, this.serialize()); } catch (e) { console.warn(e); }
+      // so grava depois de a memoria guardada ter sido lida (P0-05)
+      if (!this.restored) return;
+      let p;
+      try { p = this.host.store.put(STORE_KEY, this.serialize()); } catch (e) { console.warn(e); this.saveFailed(); return; }
+      // o put devolve false (ou rejeita, no core novo) quando o navegador nao guardou (P0-06)
+      Promise.resolve(p).then(ok => { if (ok === false) this.saveFailed(); else this.saveWarned = false; },
+        e => { console.warn(e); this.saveFailed(); });
+    }
+
+    /** Avisa uma vez no LCD que a memoria nao foi guardada (ate a proxima gravacao boa). */
+    saveFailed() {
+      if (this.saveWarned || !this.on) return;
+      this.saveWarned = true;
+      const show = () => { if (this.on) this.flash("MEMORY NOT STORED IN THE BROWSER", "SAVE IT TO A FILE: DISK, PAGE 2", 4000); };
+      // nao apaga outra mensagem que esteja no LCD: espera ela terminar
+      const left = this.flashUntil - performance.now();
+      if (left > 0) setTimeout(show, left + 50); else show();
     }
 
     busy(b) { if (this.el.busy) this.el.busy.classList.toggle("on", b); }
