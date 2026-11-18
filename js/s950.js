@@ -265,9 +265,28 @@ window.RJ = window.RJ || {};
       const inp = this.el.file;
       inp.accept = accept;
       this.onFiles = fn;
+      if (this.pickWait) this.pickWait();      // um seletor esperando de antes: desiste dele
+      // O iPhone so abre o seletor dentro de um touchend/click; o ENT dispara no pointerdown,
+      // que la nao vale (P0-03). Dentro de um click/tecla, ou com mouse, abre na hora; no toque
+      // (ou vindo do MIDI, sem gesto) espera o fim do toque e desiste se o toque for cancelado.
+      const ev = window.event, type = ev && ev.type;
       const ua = navigator.userActivation;
-      if (ua && !ua.isActive) window.addEventListener("pointerup", () => inp.click(), { once: true });
-      else inp.click();
+      const mouse = ev && ev.pointerType === "mouse";
+      const inGesture = type === "click" || type === "touchend" || type === "keydown" || type === "keyup";
+      const coarse = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+      if (inGesture || mouse || ((!ev || !ev.pointerType) && !coarse && (!ua || ua.isActive))) { inp.click(); return; }
+      const evs = ["touchend", "click"], quit = ["pointercancel", "touchcancel"];
+      let tm = 0;
+      const done = () => {
+        clearTimeout(tm); this.pickWait = null;
+        evs.forEach(n => window.removeEventListener(n, open, true));
+        quit.forEach(n => window.removeEventListener(n, done, true));
+      };
+      const open = () => { done(); try { inp.click(); } catch (e) { console.warn(e); } };
+      evs.forEach(n => window.addEventListener(n, open, true));
+      quit.forEach(n => window.addEventListener(n, done, true));
+      tm = setTimeout(done, 3000);
+      this.pickWait = done;
     }
 
     /* =========================================================== liga/desliga */
